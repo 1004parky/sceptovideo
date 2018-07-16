@@ -10,7 +10,7 @@ import skimage.feature
 
 import bootcamp_utils
 
-from sceptovideo.behavioral_analysis import segmentation as seg
+from behavioral_analysis import segmentation as seg
 
 #Takes an image and the bg image and returns the coordinates and sizes of the blobs of interest.
 def processImage(im, im_bg, thresh):
@@ -61,6 +61,7 @@ def matchBlobs(oim, nim, db, size_weight=1, orient_weight=1, xy_weight=1):
     new_tp=pd.Series(data=ncentroids)
     return pd.concat([db,new_tp], axis=1, ignore_index=True), nim.reindex(nlabels)
 
+"""
 def getDisp():
     #Get displacement, just take first and last point.
 
@@ -87,3 +88,4 @@ def trackImgs(fpath, bg_path, thresh)
     data=pd.concat([data, processed_im[0].get('centroid')], axis=1, ignore_index=True)
     for j in range(len(processed_im)-1):
         data, processed_im[j+1]=matchBlobs(processed_im[j], processed_im[j+1], data)
+"""
