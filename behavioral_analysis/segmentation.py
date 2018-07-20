@@ -1,6 +1,7 @@
 import numpy as np
 import skimage.io
 import skimage.filters
+import pandas as pd
 
 def _check_image_input(im):
     if not isinstance(im, np.ndarray):
@@ -153,6 +154,49 @@ def _check_crop_inputs(cent, width, height):
         raise RuntimeError("The width must be integer type")
     if not _check_int_types(height):
         raise RuntimeError("The height must be integer type")
+
+def region_props_to_tuple(rp):
+    """Function to extract the region properties from a regionprops
+    object.
+    
+    Parameters
+    ----------
+    rp : skimage.measure._regionprops._RegionProperties, a region properties
+        object from which to extract attributes
+    Returns
+    -------
+    attributes : tuple. The regionproperty fields for many properites of a blob
+    labels : tuple. The corresponding label for teh values in attributes
+    """
+    
+    if not isinstance(rp, skimage.measure._regionprops._RegionProperties):
+        raise RuntimeError("Must provide a regionprops object returned by skimage.measure.regionprops")
+        
+    labels = ('area', 'bbox_min_row', 'bbox_min_col', 'bbox_max_row', 'bbox_max_col', 'bbox_area',
+              'centroid_row', 'centroid_col', 'convex_area', 'eccentricity', 'equivalent_diameter',
+              'euler_number', 'extent', 'filled_area', 'label', 'local_centroid_row', 'local_centoid_col',
+              'major_axis_length', 'max_intensity', 'mean_intensity', 'min_intensity', 'minor_axis_length',
+              'orientation', 'perimeter', 'solidity', 'weighted_centroid_row', 'weighted_centroid_col',
+              'weighted_local_centoid_row', 'weighted_local_centroid_col')
+    
+    bbox_min_row, bbox_min_col, bbox_max_row, bbox_max_col = rp.bbox
+    centroid_row, centroid_col = rp.centroid
+    local_centroid_row, local_centoid_col = rp.local_centroid
+    weighted_centroid_row, weighted_centroid_col = rp.weighted_centroid
+    weighted_local_centoid_row, weighted_local_centroid_col = rp.weighted_local_centroid
+
+    attributes = (rp.area, bbox_min_row, bbox_min_col, bbox_max_row, bbox_max_col,
+                  rp.bbox_area, centroid_row, centroid_col, rp.convex_area, 
+                  rp.eccentricity, rp.equivalent_diameter, rp.euler_number,
+                  rp.extent, rp.filled_area, rp.label, local_centroid_row,
+                  local_centoid_col, rp.major_axis_length, rp.max_intensity,
+                  rp.mean_intensity, rp.min_intensity, rp.minor_axis_length,
+                  rp.orientation, rp.perimeter, rp.solidity,
+                  weighted_centroid_row, weighted_centroid_col,
+                  weighted_local_centoid_row, weighted_local_centroid_col)
+    
+    return attributes, labels
+
     
 def bg_subtract(im1, im2):
     """Function to perform background subtraction on an image
