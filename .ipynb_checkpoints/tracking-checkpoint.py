@@ -1,19 +1,13 @@
 import numpy as np
 import pandas as pd
 
-#Image processing
-import skimage.filters
 import skimage.io
-import skimage.morphology
-import skimage.exposure
-import skimage.feature
 
 import bootcamp_utils
-
 from behavioral_analysis import segmentation as seg
 
 #Takes an image and the bg image and returns the coordinates and sizes of the blobs of interest.
-def processImage(im, im_bg, thresh):
+def process_im(im, im_bg, thresh):
     im_no_bg=seg.bg_subtract(im,im_bg)
     im_bw, im_labeled, n_labels = seg.segment(im_no_bg)
     #Filter blobs by size. Not too large, not too small.
@@ -28,7 +22,7 @@ def processImage(im, im_bg, thresh):
             
     return pd.DataFrame(data=spec_labels, columns=['size','orientation','centroid'])
 
-def matchBlobs(oim, nim, db, size_weight=1, orient_weight=1, xy_weight=1):
+def match_blobs(oim, nim, db, size_weight=1, orient_weight=1, xy_weight=1):
     #oim is old image, nim is new image. Match nim indices to oim indices.
     #db is a dataframe of timepoints (rows) by specimen (column) filled with centroids.
     assert oim.shape==nim.shape
