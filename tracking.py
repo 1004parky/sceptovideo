@@ -16,18 +16,77 @@ _kw_dict = {'c': 'centroid',
             'p': 'perimeter',
             's': 'area'}
 
-def process_im(im, im_bg=None, size_thresh=[0, 0], props='soc'):
+
+def thresholding(blob, thresh_list=[(0, 0), (0, 0)], metrics='se'):
+    '''Determines whether a blob is a blob of interest (BOI).  
+
+    PARAMETERS
+    ----------
+    blob: np.ndarray
+    thresh_list: list of tuples with lower and upper bounds for each metric
+    metrics: string of keyword characters for metrics to filter blobs into BOI.  
+    Default values are s(size) and e(eccentricity)
+    Valid options for metrics:
+        | KEYWORD | MEANING           |
+        | e       | eccentricity      |
+        | j       | major_axis_length |
+        | n       | minor_axis_length |
+        | o       | orientation       |
+        | p       | perimeter         |
+        | s       | size              |
+    
+    RETURNS
+    -------
+    True if blob is a BOI, False if not.  
+    '''
+    metrics = list(metrics)
+
+    if len(metrics) != len(set(metrics)):
+        print('Warning: Some metrics keywords are repeated. Redundancies were removed.')
+        metrics = list(sorted(set(metrics), key=metrics.index))    
+    for m in metrics:
+        if m not in _kw_dict:
+            raise Exception('Metrics keyword "'+m+'" not recognized. See documentation.')
+        if m == 'c':
+            raise Exception('Thresholding functiion cannot process centroid data.')
+    if len(metrics) != len(thresh_list):
+        raise Exception('Every metric must have thresholds.')
+    for i in range(len(thresh_list)):
+        if type(thresh_list[i]) != tuple:
+            raise Exception('Enter thresholds as a list of tuples.')
+        if len(thresh_list[i]) != 2:    
+            raise Exception('All thresholds must have a lower and upper size limit')
+        if thresh_list[i] == (0, 0):
+            raise Exception('Please enter thresholds.')
+        if thresh_list[i][0] >= thresh_list[i][1]:
+            raise Exception('Threshold error. Lower bound must be smaller than upper bound.')
+    
+    hit = np.zeros((len(metrics), 1))
+    properties = skimage.measure.regionprops(blob)
+    for i in range(len(metrics)):
+        if (properties[0][_kw_dict[metrics[i]]] > thresh_list[i][0]) and (properties[0][_kw_dict[metrics[i]]] < thresh_list[i][1]):
+            hit[i] = 1
+    return (0 not in hit)
+
+
+def process_im(im, im_bg=None, props='soc', filter_func=thresholding, *args, **kwargs):
     '''Function to identify properties of blobs of interest (BOI) from an image
     
     PARAMETERS
     ----------
     im: numpy.ndarray, a 2d array representing an image with BOI
-    size_thresh: list, a list with the lower and upper size bounds for a BOI.  
-    Default treats all blobs as BOI.  
+    thresh_list: numpy.ndarray with lower and upper limits (col) for each 
+    metric (row).  Default treats all blobs as BOI.  
     im_bg: numpy.ndarray, a 2d array representing the image with no BOI
     props: string of keyword characters for properties to extract about BOI.  
     Default values are s(size), o(orientation), and c(centroid).  
-    Valid options:
+    filter_function: function name used to filter blobs into BOI.  
+    First argument must take a boolean numpy.ndarray (one blob).  
+    Default is tracking.thresholding function.  
+    Use None to consider all blobs as BOI.  
+    *args: args for the given filter_function.  
+    **kwargs: kwargs for the given filter_function.
+    Valid options for props:
         | KEYWORD | MEANING           |
         | c       | centroid          |
         | e       | eccentricity      |
@@ -42,24 +101,17 @@ def process_im(im, im_bg=None, size_thresh=[0, 0], props='soc'):
     pandas.DataFrame of BOIs (rows) and desired attributes (cols)
     '''
     props = list(props)
+    if filter_func != None:
+        filtering = True
 
     # Error handling
-    if len(size_thresh) != 2:
-        raise Exception('size_thresh must have a lower and upper size limit')
     if type(im) != np.ndarray:
         raise Exception('im must be a 2d numpy ndarray.')
     if len(props) != len(set(props)):
         print('Warning: Some property keywords are repeated. Redundancies were removed.')
-        props = list(set(props))
-    for x in props:
-        if x not in _kw_dict:
-            raise Exception('Property keyword "'+x+'" not recognized. See documentation.')
-
-    if size_thresh == [0, 0]:
-        thresholding = False
-    else:
-        thresholding = True
-
+        props = list(sorted(set(props), key=props.index))
+    if not callable(filter_func) and (filter_func != None):
+        raise Exception('Filter function is not callable.')
     if im_bg:
         if type(im_bg) != np.ndarray:
             raise Exception('im_bg must be a 2d numpy ndarray.')
@@ -70,12 +122,14 @@ def process_im(im, im_bg=None, size_thresh=[0, 0], props='soc'):
     spec_labels = []
     properties = skimage.measure.regionprops(im_labeled)
 
-    for i in range(0, n_labels):
-        if thresholding:
-            if properties[i]['area'] not in range(size_thresh[0], size_thresh[1]):
-                continue
-        spec_labels.append([ properties[i][_kw_dict[x]]  for x in props])
-            
+    if filtering:
+        for i in range(n_labels):
+            blob = (im_labeled == (i+1)) + 0
+            if filter_func(blob, *args, **kwargs):
+                spec_labels.append([properties[i][_kw_dict[x]] for x in props])
+    else:
+        spec_labels.append([properties[i][_kw_dict[x]] for x in props] for i in range(n_labels))
+
     return pd.DataFrame(data=spec_labels, 
                         columns=[_kw_dict[x] for x in props])
 
@@ -91,7 +145,7 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
     nim: pandas.DataFrame representing one timepoint after oim
     center_coord: pandas.DataFrame, stores centroids for each blob (col) and timepoint (row).  
     Default creates a blank DataFrame.
-    metrics: str of metrics with which to match blobs.  
+    metrics: str of metric keywords with which to match blobs.  
     Defaults are s(size), o(orientation), and c(centroid distance). 
         Valid options:
         | KEYWORD | MEANING           |
@@ -138,7 +192,11 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
         raise Exception('Distance function is not callable.')
     if len(metrics) != len(set(metrics)):
         print('Warning: Some property keywords were repeated. Redundancies were removed')
-        metrics = list(set(metrics))
+        metrics = list(sorted(set(metrics), key=metrics.index))
+    
+    if center_coord.empty:
+        for i in range(oim.shape[0]):  
+            center_coord[i] = [oim['centroid'].values[i]]
 
     # Number of specimen
     n_spec = oim.shape[0]
@@ -181,17 +239,14 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
                       nim.reindex(new_labels))
 
 
-def track(fpath, bg_path=None, size_thresh=[0, 0], metrics='soc', 
-          weights=None, same_weights=True, 
-          dist_func=scipy.spatial.distance.euclidean):
+def track(fpath, bg_path=None, metrics='soc', weights=None, same_weights=True, 
+          dist_func=scipy.spatial.distance.euclidean, filter_func=thresholding, *args, **kwargs):
     '''Tracks the location of several blobs of interest across multiple images
 
     PARAMETERS
     ----------
     fpath: str, absolute path of the directory containing images
     bg_path: str, absolute path of the file
-    size_thresh: list, a list with the lower and upper size bounds for a BOI.  
-    Default treats all blobs as BOI. 
     metrics: str of metrics with which to match blobs.  
     Defaults are s(size), o(orientation), and c(centroid distance). 
         Valid options:
@@ -207,6 +262,10 @@ def track(fpath, bg_path=None, size_thresh=[0, 0], metrics='soc',
     weights: list of weights corresponding respectively to given metrics
     dist_func: scipy.spatial.distance function.  Default is euclidean.  
     Other options include .braycurtis, .canberra, .cityblock, etc.
+    filter_function: function name used to filter blobs into BOI.  
+    First argument must take a boolean numpy.ndarray (one blob).  
+    Default is tracking.thresholding function.  
+    Use None to consider all blobs as BOI.  
 
     RETURNS
     -------
@@ -230,13 +289,15 @@ def track(fpath, bg_path=None, size_thresh=[0, 0], metrics='soc',
         im_bg = None
     if not callable(dist_func):
         raise Exception('Distance function is not callable.')
+    if not callable(filter_func):
+        raise Exception('Filter function is not callable.')
 
     data = pd.DataFrame()
     im_data = []
 
     for x in all_files:
         im_test = skimage.io.imread(x)
-        im_data.append(process_im(im_test, im_bg=im_bg, size_thresh=size_thresh))
+        im_data.append(process_im(im_test, im_bg=im_bg, filter_func=filter_func, *args, **kwargs))
     
     first_tp = pd.DataFrame(data = [im_data[0].get('centroid').tolist()])
     data = pd.concat([data, first_tp], axis=0, ignore_index=True)
