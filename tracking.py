@@ -112,9 +112,13 @@ def process_im(im, im_bg=None, props='soc', filter_func=thresholding, *args, **k
         props = list(sorted(set(props), key=props.index))
     if not callable(filter_func) and (filter_func != None):
         raise Exception('Filter function is not callable.')
-    if im_bg:
-        if type(im_bg) != np.ndarray:
+    if type(im_bg) != np.ndarray:
+        if im_bg == None:
+            pass
+        else:
             raise Exception('im_bg must be a 2d numpy ndarray.')
+
+    if type(im_bg) == np.ndarray:
         im = seg.bg_subtract(im, im_bg)
     im_bw, im_labeled, n_labels = seg.segment(im)
 
