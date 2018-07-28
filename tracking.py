@@ -22,7 +22,7 @@ def thresholding(blob, thresh_list=[(0, 0), (0, 0)], metrics='se'):
 
     PARAMETERS
     ----------
-    blob: np.ndarray
+    blob: np.ndarray with just one blob
     thresh_list: list of tuples with lower and upper bounds for each metric
     metrics: string of keyword characters for metrics to filter blobs into BOI.  
     Default values are s(size) and e(eccentricity)
@@ -42,7 +42,7 @@ def thresholding(blob, thresh_list=[(0, 0), (0, 0)], metrics='se'):
     metrics = list(metrics)
 
     if len(metrics) != len(set(metrics)):
-        print('Warning: Some metrics keywords are repeated. Redundancies were removed.')
+        print('WARNING: Some metrics keywords are repeated. Redundancies were removed.')
         metrics = list(sorted(set(metrics), key=metrics.index))    
     for m in metrics:
         if m not in _kw_dict:
@@ -69,7 +69,8 @@ def thresholding(blob, thresh_list=[(0, 0), (0, 0)], metrics='se'):
     return (0 not in hit)
 
 
-def process_im(im, im_bg=None, props='soc', filter_func=thresholding, *args, **kwargs):
+def process_im(im, im_bg=None, props='soc', include_frame=False, frame_id = 0, 
+                sep_centroid = False, filter_func=thresholding, *args, **kwargs):
     '''Function to identify properties of blobs of interest (BOI) from an image
     
     PARAMETERS
@@ -80,6 +81,9 @@ def process_im(im, im_bg=None, props='soc', filter_func=thresholding, *args, **k
     im_bg: numpy.ndarray, a 2d array representing the image with no BOI
     props: string of keyword characters for properties to extract about BOI.  
     Default values are s(size), o(orientation), and c(centroid).  
+    include_frame: bool, True includes frame number in returned DataFrame
+    frame_id: frame number. Only relevant if include_frame is True
+    sep_centroid: True separates centroid into x and y columns
     filter_function: function name used to filter blobs into BOI.  
     First argument must take a boolean numpy.ndarray (one blob).  
     Default is tracking.thresholding function.  
@@ -108,38 +112,57 @@ def process_im(im, im_bg=None, props='soc', filter_func=thresholding, *args, **k
     if type(im) != np.ndarray:
         raise Exception('im must be a 2d numpy ndarray.')
     if len(props) != len(set(props)):
-        print('Warning: Some property keywords are repeated. Redundancies were removed.')
+        print('WARNING: Some property keywords are repeated. Redundancies were removed.')
         props = list(sorted(set(props), key=props.index))
     if not callable(filter_func) and (filter_func != None):
         raise Exception('Filter function is not callable.')
+    if type(include_frame) != bool:
+        raise Exception('include_frame must be a boolean.')
     if type(im_bg) != np.ndarray:
         if im_bg == None:
             pass
         else:
             raise Exception('im_bg must be a 2d numpy ndarray.')
+    if sep_centroid and 'c' not in props:
+        raise Exception('There is no centroid data to separate.')
 
     if type(im_bg) == np.ndarray:
         im = seg.bg_subtract(im, im_bg)
     im_bw, im_labeled, n_labels = seg.segment(im)
 
-    #spec_labels is a list of all specimen [label, size, coordinates]
-    spec_labels = []
+    #specs is a list of all specimen [label, size, coordinates]
+    specs = []
     properties = skimage.measure.regionprops(im_labeled)
 
-    if filtering:
-        for i in range(n_labels):
+    for i in range(n_labels):
+        if filtering:
             blob = (im_labeled == (i+1)) + 0
             if filter_func(blob, *args, **kwargs):
-                spec_labels.append([properties[i][_kw_dict[x]] for x in props])
-    else:
-        spec_labels.append([properties[i][_kw_dict[x]] for x in props] for i in range(n_labels))
+                spec_data = [properties[i][_kw_dict[x]] for x in props]
+                if include_frame:
+                    spec_data.insert(0, frame_id)
+            else:
+                continue
+        else:
+            spec_data = [properties[i][_kw_dict[x]] for x in props]
+            if include_frame:
+                spec_data.insert(0, frame_id)
+        specs.append(spec_data)
 
-    return pd.DataFrame(data=spec_labels, 
-                        columns=[_kw_dict[x] for x in props])
+    col_names = [_kw_dict[x] for x in props]
+    if include_frame:
+        col_names.insert(0, 'frame')
+
+    df = pd.DataFrame(data=specs, columns=col_names)
+    if sep_centroid:
+        df[['x', 'y']] = df['centroid'].apply(pd.Series)
+        df.drop('centroid', axis = 1, inplace = True)
+
+    return df
 
 
-def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc', 
-                weights=None, same_weights=True, 
+def match_blobs(oim, nim, data=pd.DataFrame(), metrics='soc', weights=None, 
+                same_weights=True, sequential=True, sep_centroid = False, 
                 dist_func=scipy.spatial.distance.euclidean):
     '''Function to match blobs across two images using user-specified metrics
 
@@ -147,7 +170,7 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
     ----------
     oim: pandas.DataFrame with processed image data (see function process_im)
     nim: pandas.DataFrame representing one timepoint after oim
-    center_coord: pandas.DataFrame, stores centroids for each blob (col) and timepoint (row).  
+    data: pandas.DataFrame, stores centroids for each blob (col) and timepoint (row).  
     Default creates a blank DataFrame.
     metrics: str of metric keywords with which to match blobs.  
     Defaults are s(size), o(orientation), and c(centroid distance). 
@@ -162,6 +185,7 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
         | s       | size              |
     same_weights: boolean, True applies same weight (1) to all metrics
     weights: list of weights corresponding respectively to given metrics
+    sequential: Assumes that nim is the frame after oim, assigns frame numbers accordingly.  
     dist_func: scipy.spatial.distance function.  Default is euclidean.  
     Other options include .braycurtis, .canberra, .cityblock, etc.
 
@@ -174,11 +198,45 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
     if same_weights and (weights == None):
         weights = [1] * len(metrics)
 
+    if data.empty:
+        to_add = []
+        for i in range(oim.shape[0]):
+            to_add.append([oim[_kw_dict[m]].values[i] for m in metrics])
+            try:
+                to_add[i].append(oim['frame'].values[i])
+            except:
+                oim['frame'] = [0 for o in range(oim.shape[0])]
+                to_add[i].append(oim['frame'].values[i])
+            to_add[i].append(i)
+            oim.at[i, 'id'] = i
+        col_names = [_kw_dict[m] for m in metrics]
+        col_names.append('frame')
+        col_names.append('id')
+        data = pd.DataFrame(data=to_add, columns=col_names)
+
     # Error handling
-    if not oim.shape[0] == nim.shape[0]:
-        raise Exception('oim and nim must have the same number of rows')
-    if not type(center_coord) == pd.core.frame.DataFrame:
-        raise Exception('center_coord must be a pandas.DataFrame.')
+    if sep_centroid and 'c' not in metrics:
+        raise Exception('There is no centroid data to separate.')
+    try:
+        oim['frame']
+        try:
+            nim['frame']
+            if (not sequential) and (oim['frame'][0] == nim['frame'][0]):
+                print('WARNING: Frame numbers for oim and nim are the same.')
+        except: 
+            pass
+    except:
+        pass
+    if not type(data) == pd.core.frame.DataFrame:
+        raise Exception('data must be a pandas.DataFrame.')
+    try:
+        data['frame']
+    except:
+        raise Exception('data must contain frame column')
+    try:
+        data['id']
+    except:
+        raise Exception('data must contain id column')
     if len(weights) != len(metrics):
         raise Exception('Must provide a weight for each metric provided')
     for x in metrics:
@@ -195,28 +253,21 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
     if not callable(dist_func):
         raise Exception('Distance function is not callable.')
     if len(metrics) != len(set(metrics)):
-        print('Warning: Some property keywords were repeated. Redundancies were removed')
+        print('WARNING: Some property keywords were repeated. Redundancies were removed')
         metrics = list(sorted(set(metrics), key=metrics.index))
     
-    if center_coord.empty:
-        for i in range(oim.shape[0]):  
-            center_coord[i] = [oim['centroid'].values[i]]
-
-    # Number of specimen
-    n_spec = oim.shape[0]
-
     # Initialize matrix of comparison scores
-    comp_matrix = np.zeros((n_spec, n_spec, len(metrics)))
+    comp_matrix = np.zeros((nim.shape[0], oim.shape[0], len(metrics)))
 
     # Fill in comparison matrix
     for i in range(len(metrics)):
-        for n in range(n_spec):
-            for o in range(n_spec):
+        for n in range(nim.shape[0]):
+            for o in range(oim.shape[0]):
                 if metrics[i] == 'c':
                     comp_matrix[n][o][i] = (weights[i] * 
                         dist_func(oim[_kw_dict[metrics[i]]].values[o], 
-                                  nim[_kw_dict[metrics[i]]].values[n]))
-                else:
+                        nim[_kw_dict[metrics[i]]].values[n]))
+                elif metrics[i] != 'y':
                     try:
                         comp_matrix[n][o][i] = (weights[i] * 
                             abs(oim[_kw_dict[metrics[i]]].values[o] - 
@@ -229,18 +280,49 @@ def match_blobs(oim, nim, center_coord=pd.DataFrame(), metrics='soc',
 
     # Add the differences up, want to minimize the sum of differences.
     p_match = np.array([[sum(comp_matrix[i][j][:]) 
-                        for j in range(n_spec)] for i in range(n_spec)])
+                        for j in range(oim.shape[0])] 
+                        for i in range(nim.shape[0])])
+    new_labels = np.argmin(p_match, axis=1)
 
-    new_labels = np.argsort(np.argmin(p_match, axis=1))    
+    max_id = max(data['id'].values)
+    new_id = np.array([int(oim['id'].values[i]) for i in new_labels])
+
+    # If more thaan one nim blob matched to oim blob, identify true match and
+    # assign new id to other nim blobs.
+    for i in range(len(new_labels)):
+        if (new_labels == new_labels[i]).sum() > 1:
+            rpt = [j for j, x in enumerate(new_labels) if x == new_labels[i]]
+            match_poss = [p_match[k][new_labels[i]] for k in rpt]
+            true_match = rpt[np.argmin(match_poss)]
+            for l in rpt:
+                if l != true_match:
+                    new_id[l] = max_id
+                    max_id += 1
+
+    to_add = []
+    for i in range(nim.shape[0]):
+        to_add.append([nim[_kw_dict[m]].values[i] for m in metrics])
+        if sequential:
+            nim['frame'] = [oim['frame'].values[0]+1 for n in range(nim.shape[0])]
+            to_add[i].append(nim['frame'].values[i])
+        else:
+            try:
+                to_add[i].append(nim['frame'].values[i])
+            except:
+                nim['frame'] = [oim['frame'].values[0]+1 for n in range(nim.shape[0])]
+                to_add[i].append(nim['frame'].values[i])
+        to_add[i].append(new_id[i])
+    col_names = [_kw_dict[m] for m in metrics]
+    col_names.append('frame')
+    col_names.append('id')
+    new_tp = pd.DataFrame(data=to_add, columns=col_names)
+
+    data = pd.concat([data, new_tp], axis=0, ignore_index=True)
+    if sep_centroid:
+        data[['x', 'y']] = data['centroid'].apply(pd.Series)
+        data.drop('centroid', axis = 1, inplace = True)
     
-    # List of centroids in new order.
-    n_centroids = [nim.get('centroid')[k] for k in new_labels]
-    new_tp = pd.DataFrame()
-    for i in range(n_spec):  
-        new_tp[i] = [n_centroids[i][:]]
-
-    return (pd.concat([center_coord, new_tp], axis=0, ignore_index=True), 
-                      nim.reindex(new_labels))
+    return data, new_tp
 
 
 def track(fpath, bg_path=None, metrics='soc', weights=None, same_weights=True, 
@@ -275,6 +357,7 @@ def track(fpath, bg_path=None, metrics='soc', weights=None, same_weights=True,
     -------
     data: pandas.DataFrame with centroids for every specimen (col) at each tp (row)
     '''
+    metrics = list(metrics)
     if same_weights and (weights == None):
         weights = [1] * len(metrics)
     all_files = glob.glob(fpath)
@@ -299,13 +382,26 @@ def track(fpath, bg_path=None, metrics='soc', weights=None, same_weights=True,
     data = pd.DataFrame()
     im_data = []
 
-    for x in all_files:
-        im_test = skimage.io.imread(x)
-        im_data.append(process_im(im_test, im_bg=im_bg, filter_func=filter_func, *args, **kwargs))
-    
-    first_tp = pd.DataFrame(data = [im_data[0].get('centroid').tolist()])
-    data = pd.concat([data, first_tp], axis=0, ignore_index=True)
+    for x in range(len(all_files)):
+        im_test = skimage.io.imread(all_files[x])
+        im_data.append(process_im(im_test, im_bg=im_bg, include_frame = True, 
+                       frame_id = x, filter_func=filter_func, *args, **kwargs))
 
+    to_add = []
+    for i in range(im_data[0].shape[0]):
+        to_add.append([im_data[0][_kw_dict[m]].values[i] for m in metrics])
+        try:
+            to_add[i].append(im_data[0]['frame'].values[i])
+        except:
+            im_data[0]['frame'] = [0 for o in range(im_data[0].shape[0])]
+            to_add[i].append(im_data[0]['frame'].values[i])
+        to_add[i].append(i)
+        im_data[0].at[i, 'id'] = i
+    col_names = [_kw_dict[m] for m in metrics]
+    col_names.append('frame')
+    col_names.append('id')
+    data = pd.DataFrame(data=to_add, columns=col_names)
+    
     for j in range(len(im_data)-1):
         data, im_data[j+1] = match_blobs(im_data[j], 
                                          im_data[j+1], 
@@ -314,4 +410,7 @@ def track(fpath, bg_path=None, metrics='soc', weights=None, same_weights=True,
                                          weights=weights,
                                          same_weights=same_weights, 
                                          dist_func=dist_func)
+    if 'c' in metrics:
+        data[['x', 'y']] = data['centroid'].apply(pd.Series)
+        data.drop('centroid', axis = 1, inplace = True)
     return data
