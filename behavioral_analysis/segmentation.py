@@ -197,6 +197,51 @@ def region_props_to_tuple(rp):
     
     return attributes, labels
 
+def construct_bg_img(ims, num_ims=10, quart=75):
+    """Function to make a background image for a behavioral arena
+    based on images of the arena populated by animals of interest.
+    
+    Parameters
+    ----------
+    ims : array like of np.array with shape (l, n, m)
+        A set of image (with only one color chanel) to construct
+        a background image with
+    num_ims : int
+        number of images to use in the construction of the background.
+        If the animals in the arena do not move much, this number will need
+        to be larger than the default of 10.
+    quart : numeric
+        the quartile of pixel values to decide what the background versus animal
+        is. In an arena which is bottom lit, a quartile above 50 should give the
+        value from the background (since the animal is dark and the bg is light)
+    Returns
+    -------
+    output : 2d numpy.ndarray with shape (n, m)
+        background image constructed from the data
+    """
+    
+    if not _check_array_like(ims):
+        raise RuntimeError('Provided ims object is not array like, it is type ' + str(type(ims)))
+    
+    [_check_image_input(im) for im in ims]
+    
+    if not _check_int_types(num_ims):
+        raise RuntimeError('Please provide an integer for the num_ims parameter. Provided argument has type ' + str(type(num_ims)))
+    
+    rands = np.random.randint(low=0, high=len(ims), size=num_ims)
+    w = ims[0].shape[0]
+    h = ims[0].shape[1]
+    l = len(rands) 
+    ims_draw = np.zeros(shape=(l, w, h))
+    for i, ind in enumerate(rands):
+        ims_draw[i] = ims[ind]
+                    
+    new_im = np.zeros(ims[0].shape)
+    for i in range(new_im.shape[0]):
+        for j in range(new_im.shape[1]):
+            new_im[i, j] = int(np.percentile(ims_draw[:, i, j], quart)) 
+            
+    return new_im
     
 def bg_subtract(im1, im2):
     """Function to perform background subtraction on an image

@@ -255,3 +255,24 @@ def test_check_crop_inputs():
     with pytest.raises(RuntimeError) as excinfo:
             segmentation._check_crop_inputs(cent, width, height)
     excinfo.match("The height must be integer type")
+    
+def test_bg_image_maker_string_err():
+    im = np.array([[0,1], [0,1]])
+    ims = 'im, im, im'
+    with pytest.raises(RuntimeError) as excinfo:
+        segmentation.construct_bg_img(ims)
+    excinfo.match('Provided ims object is not array like, it is type <class \'str\'>')
+    
+def test_bg_image_maker_im_err():
+    im = np.array(['[0,1]', '[0,1]', '[0,1]'])
+    ims = [im, im, im]
+    with pytest.raises(RuntimeError) as excinfo:
+        segmentation.construct_bg_img(ims)
+    excinfo.match('Need to provide an array with shape \(n, m\). Provided array has shape \(3,\)')
+    
+def test_bg_image_maker_im_err():
+    im = np.array([[0,1], [0,1]])
+    ims = [im, im, im]
+    with pytest.raises(RuntimeError) as excinfo:
+        segmentation.construct_bg_img(ims, num_ims=10.0)
+    excinfo.match('Please provide an integer for the num_ims parameter. Provided argument has type ' + str(type(10.0)))

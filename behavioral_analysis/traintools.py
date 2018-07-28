@@ -137,7 +137,6 @@ def button_label(ims, button_values=('beetle', 'ant')):
             im_num.append(im_num[-1]+direction)
             data = data.data_source
             source.data = data.data
-            draw_tool.empty_value = im_num[-1]
             callback_point_view('tap')
 
         def callback_label_button(value):        
