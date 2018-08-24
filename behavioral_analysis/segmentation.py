@@ -46,11 +46,7 @@ def _check_numeric_types(number):
         isinstance(number, np.int)      or
         isinstance(number, np.int32)    or
         isinstance(number, np.int64)    or
-        isinstance(number, np.float)    or
-        isinstance(number, np.float16)  or
-        isinstance(number, np.float32)  or
-        isinstance(number, np.float64)  or
-        isinstance(number, np.float128) ):
+        isinstance(number, np.float) ):
         return True
     return False
 
@@ -59,10 +55,7 @@ def _check_int_types(number):
         isinstance(number, np.int)      or
         isinstance(number, np.int32)    or
         isinstance(number, np.int64)    or
-        isinstance(number, np.uint8)    or
-        isinstance(number, np.uint16)   or
-        isinstance(number, np.uint32)   or
-        isinstance(number, np.uint64)):
+        isinstance(number, np.uint8)):
         return True
     return False
 
